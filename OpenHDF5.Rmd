@@ -1,0 +1,233 @@
+---
+title: "OpenHDF5"
+author: "Catherine Hulshof DLP"
+date: "June 20, 2016"
+output: html_document
+---
+
+## About this code
+
+```{r load-libraries }
+# load libraries 
+library(raster)
+library(rhdf5)
+library(rgdal)
+
+```
+
+## Let's open a file
+
+```{r select-file }
+f <- "../NEONdata/D17-California/TEAK/2013/spectrometer/reflectance/Subset3NIS1_20130614_100459_atmcor.h5"
+
+#view H5 structure
+
+h5ls(f)
+```
+
+## Import spatial information
+
+```{r import-spatial-info }
+
+# import sptial info
+
+mapInfo <- h5read(f,
+                  "map info",
+                  read.attributes = TRUE)
+mapInfo
+```
+
+## Grab reflectance metadata
+
+```{r get-reflectance-metadata}
+
+# read in reflectance data attributes
+
+reflInfo <- h5readAttributes(file = f,
+                             name = "Reflectance")
+reflInfo
+
+# define scale factor
+scaleFactor <- reflInfo$'Scale Factor'
+
+#define no data value
+noDataValue <- as.numeric(reflInfo$`data ignore value`)
+str(noDataValue)
+```
+
+## Import Data Dimensions
+
+```{r import-dims }
+
+# open hdf5 file for viewing
+fid <- H5Fopen(f)
+
+# open the reflectance dataset
+did <- H5Dopen(fid,"Reflectance")
+
+# grab the dataset dimensions
+sid <- H5Dget_space(did)
+dims <-  H5Sget_simple_extent_dims(sid)$size
+dims
+
+# close all open connections
+H5Sclose(sid)
+H5Dclose(did)
+H5Fclose(fid)
+
+```
+
+## Read in Reflectance Data
+Notes could go here!
+
+```{r read-data }
+
+# extract slice of H5 file
+b56 <- h5read(f,
+              "Reflectance",
+              index=list(1:dims[1],1:dims[2],56))
+b56
+class(b56)
+
+```
+
+## Convert Data to Matrix
+
+```{r convert-matrix }
+
+#convert array to matrix
+b56 <- b56[,,1]
+
+#let's plot some data finally
+
+image(b56)
+
+image(log(b56),
+      main="log transformed data")
+
+hist(b56)
+```
+
+## Time to clean up our data
+
+```{r data-clean-up }
+
+# assign no data values to object
+
+b56[b56 == noDataValue] <- NA
+
+# apply the scale factor
+
+b56 <- b56 / scaleFactor
+hist(b56)
+
+```
+
+## Transpose Data
+
+```{r transpose-data }
+# transpose the data
+b56 <- t(b56)
+image(log(b56))
+```
+
+## Create Spatial Extent
+
+```{r create-spatial-extent }
+# split out Map Info object
+
+mapInfo <- strsplit(mapInfo,",")
+mapInfo <- unlist(mapInfo)
+mapInfo
+
+# value at 3 element in list
+mapInfo[3]
+
+xMin <- as.numeric(mapInfo[4])
+yMax <- as.numeric(mapInfo[5])
+
+# get spatial resolution
+
+xres <- as.numeric(mapInfo[6])
+yres <- as.numeric(mapInfo[7])
+
+# Calculate Xmax and Ymin
+
+xMax <- xMin + (dims[1] * xres)
+Ymin <- yMax - (dims[2] * yres)
+
+```
+
+## Create spatial extent
+
+```{r create-extent }
+
+# create extent object
+rasExt <- extent(xMin,xMax,Ymin,yMax)
+
+
+# create raster object
+
+b56r <- raster(b56,
+               crs=CRS("+init=epsg:32611"))
+
+extent(b56r) <- rasExt
+
+#plot data
+
+plot(b56r,
+     main="spatially referenced data")
+```
+
+## Import NEON functions
+
+```{r import-using-functions }
+
+#install devtools
+
+install.packages("devtools")
+library(devtools)
+install_github("lwasser/neon-aop-package/neonAOP")
+library(neonAOP)
+
+# use open band function to view data
+b55 <- open_band(f,
+                 bandNum = 55,
+                 epsg = 32611)
+b55
+
+# plot data
+
+plot(b55)
+
+#define epsg code
+epsg <- 32611
+
+# import several bands
+
+bands <- c(58,34,19)
+
+# create raster stack
+
+RGBStack <- create_stack(f,
+                         bands = bands,
+                         epsg = epsg)
+
+plot(RGBStack)
+
+# plot RGB image
+
+plotRGB(RGBStack,
+        stretch='lin')
+
+# create and plot cir image
+
+bands <- c(90,34,19)
+CIRStack <- create_stack(f,
+                         bands=bands,
+                         epsg=epsg)
+
+plotRGB(CIRStack,
+        stretch='lin')
+```
+
